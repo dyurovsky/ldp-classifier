@@ -1,0 +1,91 @@
+---
+title: "ldp classifier"
+author: "Flora Zhang and Dan Yurovsky"
+date: "2/21/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(lme4)
+library(here)
+library(boot)
+library(broom)
+```
+
+```{r}
+child_data <- read_tsv(here("data/ldp_child.csv")) %>%
+  mutate(person = "child") %>%
+  select(-X1)
+
+parent_data <- read_tsv(here("data/ldp_parent.csv")) %>%
+  mutate(person = "parent") %>%
+  select(-X1)
+
+
+all_data <- bind_rows(child_data, parent_data) %>%
+  select(-id) %>%
+  filter(!is.na(cnt_3S)) %>%
+  mutate(person = as.numeric(factor(person, levels = c("parent", "child"))) - 1) 
+
+
+
+model <- glm(person ~ ., family = "binomial",data = all_data)
+
+
+features <- tidy(model)
+
+features %>%
+  arrange(desc(abs(statistic)))
+
+predicted_data <- all_data %>% 
+  mutate(prediction = inv.logit(predict(model))) %>%
+  mutate(is_child = prediction > .5)
+
+cor.test(predicted_data$prediction, predicted_data$person)
+```
+
+
+```{r}
+all_data %>%
+  group_by(person) %>%
+  summarise(bool_question = mean(bool_question, na.rm = T),
+            cnt_MentalStateVerb = mean(cnt_MentalStateVerb))
+```
+
+
+```{r}
+acc_data <- predicted_data %>%
+  group_by(person, is_child) %>%
+  summarise(n = n()) %>%
+  ungroup() %>%
+  mutate(person = if_else(person == 0, "parent", "child"),
+         predicted_person = if_else(is_child, "child", "parent"))
+
+
+tp <-  acc_data %>%
+  filter(person == "child" & predicted_person == "child") %>%
+  summarise(n = sum(n)) %>%
+  pull(n)
+
+fp <- acc_data %>%
+  filter(person == "parent", predicted_person == "child") %>%
+  summarise(n = sum(n)) %>%
+  pull(n)
+
+fn <- acc_data %>%
+  filter(person == "child", predicted_person == "parent") %>%
+  summarise(n = sum(n)) %>%
+  pull(n)
+
+
+precision <- tp / (tp + fp)
+recall <- tp / (tp + fn)
+
+recall = acc_data %>%
+  filter(person == predicted_person) %>%
+  summarise(n = sum(n)) %>%
+  pull(n) / sum(acc_data$n)
+
+
+```
