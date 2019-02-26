@@ -29,6 +29,31 @@ all_data <- bind_rows(child_data, parent_data) %>%
   mutate(person = as.numeric(factor(person, levels = c("parent", "child"))) - 1) 
 
 
+train_data <- all_data %>%
+  ungroup() %>%
+  sample_frac(.8)
+
+# not right
+test_data <- anti_join(train_data, all_data)
+
+test_data <- all_data %>%
+  ungroup() %>%
+  sample_frac(.2)
+
+
+
+model <- glm(person ~ ., family = "binomial",data = train_data)
+
+predicted_data <- test_data %>% 
+  mutate(prediction = inv.logit(predict(model, newdata = .))) %>%
+  mutate(is_child = prediction > .5)
+
+
+
+```
+
+
+```{r}
 
 model <- glm(person ~ ., family = "binomial",data = all_data)
 
@@ -82,10 +107,6 @@ fn <- acc_data %>%
 precision <- tp / (tp + fp)
 recall <- tp / (tp + fn)
 
-recall = acc_data %>%
-  filter(person == predicted_person) %>%
-  summarise(n = sum(n)) %>%
-  pull(n) / sum(acc_data$n)
-
+f <- (2 * (precision * recall)) / (precision + recall)
 
 ```
