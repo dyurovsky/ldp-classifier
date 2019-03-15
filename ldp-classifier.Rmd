@@ -13,6 +13,7 @@ library(boot)
 library(broom)
 library(naivebayes)
 library(irr)
+library(tidyboot)
 ```
 
 ```{r old_data}
@@ -113,65 +114,98 @@ f <- (2 * (precision * recall)) / (precision + recall)
 all_data <- read_tsv(here("data/02122019processed_alldata_with_identity_session_col.csv")) %>%
   select(-X, -id, -chat:-syntype, -identity_session)
 
-nb <- all_data %>%
-  filter(session == 5) %>%
-  select(-session, -subject) %>%
+tidy_data <- all_data %>%
   mutate(identity_binary = as.logical(identity_binary)) %>%
-  naive_bayes(identity_binary ~ ., data = .)
+  select(-subject) %>%
+  group_by(session)
 
-all_data_predicted <- all_data %>%
-  filter(session == 5) %>%
-  select(-session, -subject) %>%
-  mutate(predicted = as.numeric(predict(nb))-1)%>%
-  group_by(identity_binary, predicted) %>%
-  summarise(n = n()) 
+nbs <- tidy_data %>%
+  nest() %>%
+  mutate(nb = map(data, ~naive_bayes(identity_binary ~ ., data = .x))) 
 
-p_tp <- all_data_predicted %>%
-  filter(identity_binary == 0 & predicted == 0) %>%
-  pull(n)
+predicted <- nbs %>%
+  mutate(predicted = map(nb, predict)) %>%
+  select(-nb) %>%
+  unnest()
+```
 
-p_fp <- all_data_predicted %>%
-  filter(identity_binary == 1 & predicted == 0) %>%
-  pull(n)
+```{r}
+get_scores <- function(this_session, identity) {
+    
+  tp <- counts %>%
+    filter(session == this_session & identity_binary == identity & 
+             predicted == identity) %>%
+    pull(n)
+  
+  fp <- counts %>%
+    filter(session == this_session & identity_binary != identity & 
+             predicted == identity) %>%
+    pull(n)
+  
+  tn <- counts %>%
+    filter(session == this_session & identity_binary != identity & 
+             predicted != identity) %>%
+    pull(n)
+  
+  fn <- counts %>%
+    filter(session == this_session & identity_binary == identity & 
+             predicted != identity) %>%
+    pull(n)
+  
+  data_frame(session = this_session, identity_binary = identity, tp = tp, fp = fp,
+             tn = tn, fn = fn)
+}
 
-p_tn <- all_data_predicted %>%
-  filter(identity_binary == 1 & predicted == 1) %>%
-  pull(n)
+counts <- predicted %>%
+  group_by(session, identity_binary, predicted) %>%
+  summarise(n = n()) %>%
+  mutate(predicted = as.logical(predicted))
 
-p_fn <- all_data_predicted %>%
-  filter(identity_binary == 0 & predicted == 1) %>%
-  pull(n)
+ids <- counts %>%
+  select(session, identity_binary) %>%
+  distinct()
 
+scores <- map2_dfr(ids$session, ids$identity_binary, get_scores) %>%
+  mutate(precision = tp / (tp + tn),
+         recall = tp / (tp + fn),
+         f = (2 * precision * recall) / (precision + recall),
+         accuracy = (tp + tn)/(tp + tn + fp + fn)) %>%
+  mutate(identity_binary = factor(identity_binary, labels = c("parent", "child")))
 
-p_precision <- p_tp / (p_tp + p_tn)
-p_recall <- p_tp / (p_tp + p_fn)
-p_f <- (2 * p_precision * p_recall) / (p_precision + p_recall)
-
-c_tp <- all_data_predicted %>%
-  filter(identity_binary == 1 & predicted == 1) %>%
-  pull(n)
-
-c_fp <- all_data_predicted %>%
-  filter(identity_binary == 0 & predicted == 1) %>%
-  pull(n)
-
-c_tn <- all_data_predicted %>%
-  filter(identity_binary == 0 & predicted == 0) %>%
-  pull(n)
-
-c_fn <- all_data_predicted %>%
-  filter(identity_binary == 1 & predicted == 0) %>%
-  pull(n)
+scores %>%
+  gather(measure, value, precision, recall, f, accuracy) %>%
+  ggplot(aes(x = session, y = value, color = measure, group = measure)) + 
+  facet_wrap(~identity_binary) + 
+  geom_line() +
+  theme_classic(base_size = 14)
+ggsave("classifer.pdf")
+```
 
 
-c_precision <- c_tp / (c_tp + c_tn)
-c_recall <- c_tp / (c_tp + c_fn)
-c_f <- (2 * c_precision * c_recall) / (c_precision + c_recall)
+```{r}
+predicted_prob<- nbs %>%
+  mutate(predicted = map(nb, ~predict(.x, type = "prob"))) %>%
+  select(-nb) %>%
+  mutate(predicted = map(predicted, as_tibble)) %>%
+  unnest() %>%
+  mutate(child = `TRUE`/(`FALSE` +`TRUE`))
+
+cors <- predicted_prob %>%
+  group_by(session) %>%
+  summarise(cor = cor(child, identity_binary))
+
+ggplot(cors, aes(x = session, y = cor)) + 
+  geom_line() + 
+  scale_x_continuous(breaks = 1:12) +
+  scale_y_continuous(limits = c(0, .5)) +
+  theme_classic(base_size = 14) 
+ggsave("correlation.pdf")
+
+```
 
 
+```{r}
 cor(all_data_predicted$identity_binary, all_data_predicted$predicted)
 
 kappa2(all_data_predicted[c("identity_binary", "predicted")])
-
-
 ```
