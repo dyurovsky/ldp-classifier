@@ -161,6 +161,12 @@ counts <- predicted %>%
   summarise(n = n()) %>%
   mutate(predicted = as.logical(predicted))
 
+
+predicted %>%
+  group_by(session, identity_binary) %>%
+  summarise(n = n()) %>%
+  mutate(predicted = as.logical(predicted))
+
 ids <- counts %>%
   select(session, identity_binary) %>%
   distinct()
@@ -170,7 +176,7 @@ scores <- map2_dfr(ids$session, ids$identity_binary, get_scores) %>%
          recall = tp / (tp + fn),
          f = (2 * precision * recall) / (precision + recall),
          accuracy = (tp + tn)/(tp + tn + fp + fn)) %>%
-  mutate(identity_binary = factor(identity_binary, labels = c("parent", "child")))
+  mutate(identity_binary = factor(identity_binary, labels = c("child", "parent")))
 
 scores %>%
   gather(measure, value, precision, recall, f, accuracy) %>%
