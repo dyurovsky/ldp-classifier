@@ -11,9 +11,11 @@ library(lme4)
 library(here)
 library(boot)
 library(broom)
+library(naivebayes)
+library(irr)
 ```
 
-```{r}
+```{r old_data}
 child_data <- read_tsv(here("data/ldp_child.csv")) %>%
   mutate(person = "child") %>%
   select(-X1)
@@ -40,15 +42,11 @@ test_data <- all_data %>%
   ungroup() %>%
   sample_frac(.2)
 
-
-
 model <- glm(person ~ ., family = "binomial",data = train_data)
 
 predicted_data <- test_data %>% 
   mutate(prediction = inv.logit(predict(model, newdata = .))) %>%
   mutate(is_child = prediction > .5)
-
-
 
 ```
 
@@ -108,5 +106,72 @@ precision <- tp / (tp + fp)
 recall <- tp / (tp + fn)
 
 f <- (2 * (precision * recall)) / (precision + recall)
+```
+
+
+```{r new_data}
+all_data <- read_tsv(here("data/02122019processed_alldata_with_identity_session_col.csv")) %>%
+  select(-X, -id, -chat:-syntype, -identity_session)
+
+nb <- all_data %>%
+  filter(session == 5) %>%
+  select(-session, -subject) %>%
+  mutate(identity_binary = as.logical(identity_binary)) %>%
+  naive_bayes(identity_binary ~ ., data = .)
+
+all_data_predicted <- all_data %>%
+  filter(session == 5) %>%
+  select(-session, -subject) %>%
+  mutate(predicted = as.numeric(predict(nb))-1)%>%
+  group_by(identity_binary, predicted) %>%
+  summarise(n = n()) 
+
+p_tp <- all_data_predicted %>%
+  filter(identity_binary == 0 & predicted == 0) %>%
+  pull(n)
+
+p_fp <- all_data_predicted %>%
+  filter(identity_binary == 1 & predicted == 0) %>%
+  pull(n)
+
+p_tn <- all_data_predicted %>%
+  filter(identity_binary == 1 & predicted == 1) %>%
+  pull(n)
+
+p_fn <- all_data_predicted %>%
+  filter(identity_binary == 0 & predicted == 1) %>%
+  pull(n)
+
+
+p_precision <- p_tp / (p_tp + p_tn)
+p_recall <- p_tp / (p_tp + p_fn)
+p_f <- (2 * p_precision * p_recall) / (p_precision + p_recall)
+
+c_tp <- all_data_predicted %>%
+  filter(identity_binary == 1 & predicted == 1) %>%
+  pull(n)
+
+c_fp <- all_data_predicted %>%
+  filter(identity_binary == 0 & predicted == 1) %>%
+  pull(n)
+
+c_tn <- all_data_predicted %>%
+  filter(identity_binary == 0 & predicted == 0) %>%
+  pull(n)
+
+c_fn <- all_data_predicted %>%
+  filter(identity_binary == 1 & predicted == 0) %>%
+  pull(n)
+
+
+c_precision <- c_tp / (c_tp + c_tn)
+c_recall <- c_tp / (c_tp + c_fn)
+c_f <- (2 * c_precision * c_recall) / (c_precision + c_recall)
+
+
+cor(all_data_predicted$identity_binary, all_data_predicted$predicted)
+
+kappa2(all_data_predicted[c("identity_binary", "predicted")])
+
 
 ```
